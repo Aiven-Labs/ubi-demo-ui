@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UBI Demo UI</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; background: #f7f7fb; color: #1b1d25; }
+      .layout { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; padding: 16px; height: 100vh; box-sizing: border-box; }
+      .panel { background: #fff; border: 1px solid #d9deec; border-radius: 10px; padding: 14px; }
+      .controls { display: flex; gap: 8px; margin-bottom: 12px; }
+      input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #b9c4e0; }
+      button { padding: 10px 12px; border: 0; border-radius: 8px; background: #2952cc; color: white; cursor: pointer; }
+      .muted { color: #636a7d; font-size: 13px; }
+      #results { overflow-y: auto; max-height: calc(100vh - 180px); padding-right: 4px; }
+      .card { border: 1px solid #e3e7f2; border-radius: 8px; padding: 12px; margin: 10px 0; background: #fff; }
+      .meta { font-size: 12px; color: #606882; margin-top: 6px; }
+      .value-title { margin-top: 0; }
+      .metric { margin: 10px 0; padding: 10px; border-radius: 8px; background: #f2f5ff; }
+      ul { margin: 0; padding-left: 18px; }
+      code { background: #eef2ff; padding: 2px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <section class="panel">
+        <h2>Search Demo With UBI Instrumentation</h2>
+        <p class="muted">Run searches, scroll through results, and click items. Dwell and scroll-depth events are sent to <code>ubi_events</code>.</p>
+        <div class="controls">
+          <input id="query" value="wireless headphones" />
+          <button id="searchBtn">Search</button>
+          <button id="seedBtn">Seed Data</button>
+        </div>
+        <div class="muted" id="status">No query yet.</div>
+        <div id="results"></div>
+      </section>
+
+      <aside class="panel">
+        <h3 class="value-title">Why UBI Is Valuable</h3>
+        <div class="metric"><strong>Total queries:</strong> <span id="mQueries">0</span></div>
+        <div class="metric"><strong>CTR:</strong> <span id="mCtr">0%</span></div>
+        <div class="metric"><strong>Average dwell:</strong> <span id="mDwell">0 ms</span></div>
+        <div class="metric">
+          <strong>Action counts</strong>
+          <ul id="mActions"></ul>
+        </div>
+        <div class="metric">
+          <strong>Top user queries</strong>
+          <ul id="mTopQueries"></ul>
+        </div>
+        <p class="muted">Use this to explain relevance improvements: "We do not only track what users ask, but also what they engage with and for how long."</p>
+      </aside>
+    </div>
+
+    <script>
+      const state = {
+        queryId: null,
+        queryText: "",
+        sessionId: crypto.randomUUID(),
+        clientId: "demo-ui-" + Math.random().toString(16).slice(2, 10),
+        dwellTimers: new Map(),
+        maxScrollDepth: 0
+      };
+
+      const resultsEl = document.getElementById("results");
+      const statusEl = document.getElementById("status");
+      let observer = null;
+
+      async function api(path, method = "GET", body = null) {
+        const res = await fetch(path, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: body ? JSON.stringify(body) : null
+        });
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+      }
+
+      function renderResults(items) {
+        resultsEl.innerHTML = "";
+        items.forEach((item, idx) => {
+          const card = document.createElement("div");
+          card.className = "card";
+          card.dataset.resultId = item.id;
+          card.dataset.position = String(idx + 1);
+          card.innerHTML = `
+            <h4>${item.title}</h4>
+            <p>${item.description}</p>
+            <div class="meta">Category: ${item.category} | Price: $${item.price} | Score: ${item.score.toFixed(2)}</div>
+            <div class="meta"><a href="#" data-click="1">Open product</a></div>
+          `;
+          card.querySelector("a").addEventListener("click", async (e) => {
+            e.preventDefault();
+            await sendEvent("click", card, 0);
+          });
+          resultsEl.appendChild(card);
+        });
+        setupObserver();
+      }
+
+      function setupObserver() {
+        if (observer) observer.disconnect();
+        observer = new IntersectionObserver((entries) => {
+          const now = performance.now();
+          for (const entry of entries) {
+            const key = entry.target.dataset.resultId;
+            if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+              state.dwellTimers.set(key, now);
+            } else if (state.dwellTimers.has(key)) {
+              const dwellMs = Math.round(now - state.dwellTimers.get(key));
+              state.dwellTimers.delete(key);
+              if (dwellMs >= 300) sendEvent("scroll_dwell", entry.target, dwellMs);
+            }
+          }
+        }, { threshold: [0.6] });
+        document.querySelectorAll(".card").forEach((el) => observer.observe(el));
+      }
+
+      async function sendEvent(actionName, cardEl, dwellMs) {
+        if (!state.queryId || !cardEl) return;
+        const payload = {
+          actionName,
+          queryId: state.queryId,
+          userQuery: state.queryText,
+          clientId: state.clientId,
+          sessionId: state.sessionId,
+          resultId: cardEl.dataset.resultId,
+          position: Number(cardEl.dataset.position || 0),
+          dwellMs,
+          scrollDepthPercent: Math.round(state.maxScrollDepth * 100),
+          timestamp: new Date().toISOString()
+        };
+        try { await api("/api/event", "POST", payload); } catch (_) {}
+      }
+
+      async function flushDwellTimers() {
+        const now = performance.now();
+        for (const [resultId, start] of state.dwellTimers.entries()) {
+          const card = document.querySelector(`[data-result-id="${resultId}"]`);
+          const dwellMs = Math.round(now - start);
+          if (dwellMs >= 300 && card) await sendEvent("scroll_dwell", card, dwellMs);
+        }
+        state.dwellTimers.clear();
+      }
+
+      resultsEl.addEventListener("scroll", () => {
+        const depth = (resultsEl.scrollTop + resultsEl.clientHeight) / Math.max(resultsEl.scrollHeight, 1);
+        state.maxScrollDepth = Math.max(state.maxScrollDepth, Math.min(depth, 1));
+      });
+
+      async function runSearch() {
+        await flushDwellTimers();
+        state.maxScrollDepth = 0;
+        state.queryText = document.getElementById("query").value.trim();
+        if (!state.queryText) return;
+        const data = await api("/api/search", "POST", {
+          query: state.queryText,
+          sessionId: state.sessionId,
+          clientId: state.clientId
+        });
+        state.queryId = data.queryId;
+        statusEl.textContent = `Query ID ${data.queryId} | ${data.total} hits | ${data.tookMs} ms`;
+        renderResults(data.hits);
+        refreshSummary();
+      }
+
+      async function refreshSummary() {
+        try {
+          const data = await api("/api/ubi-summary");
+          document.getElementById("mQueries").textContent = String(data.totalQueries);
+          document.getElementById("mCtr").textContent = (data.ctr * 100).toFixed(1) + "%";
+          document.getElementById("mDwell").textContent = data.avgDwellMs + " ms";
+          document.getElementById("mActions").innerHTML = Object.entries(data.actionCounts)
+            .map(([k, v]) => `<li>${k}: ${v}</li>`).join("");
+          document.getElementById("mTopQueries").innerHTML = data.topQueries
+            .map((q) => `<li>${q.query}: ${q.count}</li>`).join("");
+        } catch (_) {}
+      }
+
+      document.getElementById("searchBtn").addEventListener("click", runSearch);
+      document.getElementById("seedBtn").addEventListener("click", async () => {
+        await api("/api/seed", "POST");
+        statusEl.textContent = "Demo data ready. Run a search.";
+      });
+      document.getElementById("query").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") runSearch();
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) flushDwellTimers();
+      });
+      window.addEventListener("beforeunload", flushDwellTimers);
+
+      refreshSummary();
+      setInterval(refreshSummary, 10000);
+    </script>
+  </body>
+</html>

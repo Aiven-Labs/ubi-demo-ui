@@ -1,0 +1,198 @@
+import json
+import os
+import time
+import uuid
+from urllib.parse import unquote, urlparse
+
+import requests
+from flask import Flask, jsonify, render_template, request
+
+app = Flask(__name__)
+
+OPENSEARCH_URL = os.getenv("OPENSEARCH_URL", "").strip()
+SEARCH_INDEX = os.getenv("SEARCH_INDEX", "products_ubi_demo")
+
+
+def _client():
+    if not OPENSEARCH_URL:
+        raise RuntimeError("OPENSEARCH_URL is not set")
+    parsed = urlparse(OPENSEARCH_URL)
+    if not parsed.scheme or not parsed.hostname:
+        raise RuntimeError("OPENSEARCH_URL must be a valid URL")
+    host = f"{parsed.scheme}://{parsed.hostname}"
+    if parsed.port:
+        host += f":{parsed.port}"
+    session = requests.Session()
+    if parsed.username:
+        session.auth = (unquote(parsed.username), unquote(parsed.password or ""))
+    return session, host
+
+
+def _os_request(method: str, path: str, payload=None):
+    session, host = _client()
+    response = session.request(
+        method=method,
+        url=f"{host}{path}",
+        json=payload,
+        timeout=20,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+@app.get("/")
+def index():
+    return render_template("index.html")
+
+
+@app.post("/api/seed")
+def seed():
+    try:
+        _os_request("DELETE", f"/{SEARCH_INDEX}")
+    except Exception:
+        pass
+    _os_request("PUT", f"/{SEARCH_INDEX}", {
+        "settings": {"index": {"number_of_shards": 1, "number_of_replicas": 0}},
+        "mappings": {
+            "properties": {
+                "id": {"type": "keyword"},
+                "title": {"type": "text"},
+                "category": {"type": "keyword"},
+                "description": {"type": "text"},
+                "price": {"type": "float"},
+            }
+        },
+    })
+    docs = [
+        {"id": "sku-001", "title": "Wireless Noise-Canceling Headphones", "category": "audio", "price": 199.99, "description": "Over-ear headphones with active noise cancellation, deep bass, and 40-hour battery life."},
+        {"id": "sku-002", "title": "Bluetooth Earbuds Pro", "category": "audio", "price": 89.0, "description": "Pocket-size earbuds with clear voice pickup, low latency mode, and all-day battery with charging case."},
+        {"id": "sku-003", "title": "Mechanical Keyboard TKL", "category": "accessories", "price": 129.0, "description": "Compact tenkeyless mechanical keyboard with hot-swappable tactile switches and per-key RGB lighting."},
+        {"id": "sku-004", "title": "Ergonomic Vertical Mouse", "category": "accessories", "price": 59.0, "description": "Vertical design to reduce wrist strain during long sessions, with adjustable DPI and silent clicks."},
+        {"id": "sku-005", "title": "4K Webcam with HDR", "category": "video", "price": 149.0, "description": "Ultra HD webcam with auto framing, low-light enhancement, and dual microphones for remote meetings."},
+        {"id": "sku-006", "title": "USB-C Docking Station", "category": "accessories", "price": 179.0, "description": "Single-cable laptop dock with dual monitor output, Ethernet, and high-speed USB ports."},
+        {"id": "sku-007", "title": "Portable SSD 2TB", "category": "storage", "price": 189.0, "description": "Rugged external SSD with high transfer speed for creators and developers on the go."},
+        {"id": "sku-008", "title": "Ultrawide Monitor 34-inch", "category": "display", "price": 499.0, "description": "Curved ultrawide display with high refresh rate and color-accurate panel for productivity and gaming."},
+        {"id": "sku-009", "title": "Laptop Stand Aluminum", "category": "accessories", "price": 39.0, "description": "Adjustable stand for improved posture and airflow, suitable for laptops up to 16 inches."},
+        {"id": "sku-010", "title": "Conference Speakerphone", "category": "audio", "price": 119.0, "description": "360-degree microphone array with echo cancellation for clear hybrid meeting audio."},
+    ]
+    bulk_ops = []
+    for doc in docs:
+        bulk_ops.append({"index": {"_index": SEARCH_INDEX, "_id": doc["id"]}})
+        bulk_ops.append(doc)
+    session, host = _client()
+    response = session.post(
+        f"{host}/_bulk?refresh=true",
+        headers={"Content-Type": "application/x-ndjson"},
+        data="\n".join([json.dumps(op) for op in bulk_ops]) + "\n",
+        timeout=20,
+    )
+    response.raise_for_status()
+    return jsonify({"ok": True, "indexed_docs": len(docs)})
+
+
+@app.post("/api/search")
+def search():
+    body = request.get_json(force=True, silent=True) or {}
+    query_text = (body.get("query") or "").strip()
+    session_id = (body.get("sessionId") or "").strip()
+    client_id = (body.get("clientId") or "demo-client").strip()
+    query_id = str(uuid.uuid4())
+    if not query_text:
+        return jsonify({"error": "query is required"}), 400
+    payload = {
+        "size": 20,
+        "ext": {
+            "ubi": {
+                "query_id": query_id,
+                "user_query": query_text,
+                "client_id": client_id,
+                "object_id_field": "id",
+                "query_attributes": {
+                    "channel": "ubi-demo-ui",
+                    "session_id": session_id,
+                },
+            }
+        },
+        "query": {
+            "multi_match": {
+                "query": query_text,
+                "fields": ["title^2", "description", "category"],
+            }
+        },
+    }
+    response = _os_request("POST", f"/{SEARCH_INDEX}/_search", payload)
+    hits = [
+        {
+            "id": h.get("_source", {}).get("id", h.get("_id")),
+            "title": h.get("_source", {}).get("title", ""),
+            "description": h.get("_source", {}).get("description", ""),
+            "category": h.get("_source", {}).get("category", ""),
+            "price": h.get("_source", {}).get("price", 0),
+            "score": h.get("_score", 0),
+        }
+        for h in response.get("hits", {}).get("hits", [])
+    ]
+    return jsonify({
+        "queryId": query_id,
+        "total": response.get("hits", {}).get("total", {}).get("value", len(hits)),
+        "tookMs": response.get("took", 0),
+        "hits": hits,
+    })
+
+
+@app.post("/api/event")
+def event():
+    body = request.get_json(force=True, silent=True) or {}
+    payload = {
+        "action_name": body.get("actionName", "scroll_dwell"),
+        "query_id": body.get("queryId"),
+        "client_id": body.get("clientId", "demo-client"),
+        "session_id": body.get("sessionId"),
+        "timestamp": body.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "user_query": body.get("userQuery", ""),
+        "event_attributes": {
+            "position": {"ordinal": body.get("position", 0)},
+            "object": {"object_id": body.get("resultId", ""), "object_id_field": "id"},
+            "dwell_ms": body.get("dwellMs", 0),
+            "scroll_depth_percent": body.get("scrollDepthPercent", 0),
+        },
+    }
+    _os_request("POST", "/ubi_events/_doc?refresh=false", payload)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/ubi-summary")
+def ubi_summary():
+    queries = _os_request("POST", "/ubi_queries/_search", {
+        "size": 0,
+        "aggs": {
+            "top_queries": {"terms": {"field": "user_query.keyword", "size": 5}},
+            "total_queries": {"value_count": {"field": "query_id.keyword"}},
+        },
+    })
+    events = _os_request("POST", "/ubi_events/_search", {
+        "size": 0,
+        "aggs": {
+            "by_action": {"terms": {"field": "action_name.keyword", "size": 5}},
+            "avg_dwell": {"avg": {"field": "event_attributes.dwell_ms"}},
+        },
+    })
+    q_total = int(queries.get("aggregations", {}).get("total_queries", {}).get("value", 0))
+    by_action_buckets = events.get("aggregations", {}).get("by_action", {}).get("buckets", [])
+    by_action = {b["key"]: b["doc_count"] for b in by_action_buckets}
+    clicks = by_action.get("click", 0)
+    ctr = (clicks / q_total) if q_total else 0
+    return jsonify({
+        "totalQueries": q_total,
+        "actionCounts": by_action,
+        "avgDwellMs": round(events.get("aggregations", {}).get("avg_dwell", {}).get("value", 0) or 0, 2),
+        "topQueries": [
+            {"query": b["key"], "count": b["doc_count"]}
+            for b in queries.get("aggregations", {}).get("top_queries", {}).get("buckets", [])
+        ],
+        "ctr": round(ctr, 4),
+    })
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000)
