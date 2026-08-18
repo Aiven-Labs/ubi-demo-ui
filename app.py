@@ -60,20 +60,21 @@ def seed():
                 "category": {"type": "keyword"},
                 "description": {"type": "text"},
                 "price": {"type": "float"},
+                "image_url": {"type": "keyword"},
             }
         },
     })
     docs = [
-        {"id": "sku-001", "title": "Wireless Noise-Canceling Headphones", "category": "audio", "price": 199.99, "description": "Over-ear headphones with active noise cancellation, deep bass, and 40-hour battery life."},
-        {"id": "sku-002", "title": "Bluetooth Earbuds Pro", "category": "audio", "price": 89.0, "description": "Pocket-size earbuds with clear voice pickup, low latency mode, and all-day battery with charging case."},
-        {"id": "sku-003", "title": "Mechanical Keyboard TKL", "category": "accessories", "price": 129.0, "description": "Compact tenkeyless mechanical keyboard with hot-swappable tactile switches and per-key RGB lighting."},
-        {"id": "sku-004", "title": "Ergonomic Vertical Mouse", "category": "accessories", "price": 59.0, "description": "Vertical design to reduce wrist strain during long sessions, with adjustable DPI and silent clicks."},
-        {"id": "sku-005", "title": "4K Webcam with HDR", "category": "video", "price": 149.0, "description": "Ultra HD webcam with auto framing, low-light enhancement, and dual microphones for remote meetings."},
-        {"id": "sku-006", "title": "USB-C Docking Station", "category": "accessories", "price": 179.0, "description": "Single-cable laptop dock with dual monitor output, Ethernet, and high-speed USB ports."},
-        {"id": "sku-007", "title": "Portable SSD 2TB", "category": "storage", "price": 189.0, "description": "Rugged external SSD with high transfer speed for creators and developers on the go."},
-        {"id": "sku-008", "title": "Ultrawide Monitor 34-inch", "category": "display", "price": 499.0, "description": "Curved ultrawide display with high refresh rate and color-accurate panel for productivity and gaming."},
-        {"id": "sku-009", "title": "Laptop Stand Aluminum", "category": "accessories", "price": 39.0, "description": "Adjustable stand for improved posture and airflow, suitable for laptops up to 16 inches."},
-        {"id": "sku-010", "title": "Conference Speakerphone", "category": "audio", "price": 119.0, "description": "360-degree microphone array with echo cancellation for clear hybrid meeting audio."},
+        {"id": "sku-001", "title": "Wireless Noise-Canceling Headphones", "category": "audio", "price": 199.99, "description": "Over-ear headphones with active noise cancellation, deep bass, and 40-hour battery life.", "image_url": "https://picsum.photos/id/180/320/220"},
+        {"id": "sku-002", "title": "Bluetooth Earbuds Pro", "category": "audio", "price": 89.0, "description": "Pocket-size earbuds with clear voice pickup, low latency mode, and all-day battery with charging case.", "image_url": "https://picsum.photos/id/367/320/220"},
+        {"id": "sku-003", "title": "Mechanical Keyboard TKL", "category": "accessories", "price": 129.0, "description": "Compact tenkeyless mechanical keyboard with hot-swappable tactile switches and per-key RGB lighting.", "image_url": "https://picsum.photos/id/1/320/220"},
+        {"id": "sku-004", "title": "Ergonomic Vertical Mouse", "category": "accessories", "price": 59.0, "description": "Vertical design to reduce wrist strain during long sessions, with adjustable DPI and silent clicks.", "image_url": "https://picsum.photos/id/48/320/220"},
+        {"id": "sku-005", "title": "4K Webcam with HDR", "category": "video", "price": 149.0, "description": "Ultra HD webcam with auto framing, low-light enhancement, and dual microphones for remote meetings.", "image_url": "https://picsum.photos/id/250/320/220"},
+        {"id": "sku-006", "title": "USB-C Docking Station", "category": "accessories", "price": 179.0, "description": "Single-cable laptop dock with dual monitor output, Ethernet, and high-speed USB ports.", "image_url": "https://picsum.photos/id/160/320/220"},
+        {"id": "sku-007", "title": "Portable SSD 2TB", "category": "storage", "price": 189.0, "description": "Rugged external SSD with high transfer speed for creators and developers on the go.", "image_url": "https://picsum.photos/id/1060/320/220"},
+        {"id": "sku-008", "title": "Ultrawide Monitor 34-inch", "category": "display", "price": 499.0, "description": "Curved ultrawide display with high refresh rate and color-accurate panel for productivity and gaming.", "image_url": "https://picsum.photos/id/119/320/220"},
+        {"id": "sku-009", "title": "Laptop Stand Aluminum", "category": "accessories", "price": 39.0, "description": "Adjustable stand for improved posture and airflow, suitable for laptops up to 16 inches.", "image_url": "https://picsum.photos/id/20/320/220"},
+        {"id": "sku-010", "title": "Conference Speakerphone", "category": "audio", "price": 119.0, "description": "360-degree microphone array with echo cancellation for clear hybrid meeting audio.", "image_url": "https://picsum.photos/id/99/320/220"},
     ]
     bulk_ops = []
     for doc in docs:
@@ -128,6 +129,7 @@ def search():
             "description": h.get("_source", {}).get("description", ""),
             "category": h.get("_source", {}).get("category", ""),
             "price": h.get("_source", {}).get("price", 0),
+            "imageUrl": h.get("_source", {}).get("image_url", ""),
             "score": h.get("_score", 0),
         }
         for h in response.get("hits", {}).get("hits", [])

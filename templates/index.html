@@ -14,6 +14,10 @@
       .muted { color: #636a7d; font-size: 13px; }
       #results { overflow-y: auto; max-height: calc(100vh - 180px); padding-right: 4px; }
       .card { border: 1px solid #e3e7f2; border-radius: 8px; padding: 12px; margin: 10px 0; background: #fff; }
+      .card-body { display: grid; grid-template-columns: 140px 1fr; gap: 12px; align-items: start; }
+      .thumb { width: 140px; height: 96px; border-radius: 8px; object-fit: cover; border: 1px solid #d8e0f3; background: #edf1fb; }
+      .card h4 { margin: 0 0 6px 0; }
+      .card p { margin: 0; }
       .meta { font-size: 12px; color: #606882; margin-top: 6px; }
       .value-title { margin-top: 0; }
       .metric { margin: 10px 0; padding: 10px; border-radius: 8px; background: #f2f5ff; }
@@ -83,11 +87,17 @@
           card.className = "card";
           card.dataset.resultId = item.id;
           card.dataset.position = String(idx + 1);
+          const imageUrl = item.imageUrl || "https://picsum.photos/seed/" + encodeURIComponent(item.id || "item") + "/320/220";
           card.innerHTML = `
-            <h4>${item.title}</h4>
-            <p>${item.description}</p>
-            <div class="meta">Category: ${item.category} | Price: $${item.price} | Score: ${item.score.toFixed(2)}</div>
-            <div class="meta"><a href="#" data-click="1">Open product</a></div>
+            <div class="card-body">
+              <img class="thumb" src="${imageUrl}" alt="${item.title}" loading="lazy" />
+              <div>
+                <h4>${item.title}</h4>
+                <p>${item.description}</p>
+                <div class="meta">Category: ${item.category} | Price: $${item.price} | Score: ${item.score.toFixed(2)}</div>
+                <div class="meta"><a href="#" data-click="1">Open product</a></div>
+              </div>
+            </div>
           `;
           card.querySelector("a").addEventListener("click", async (e) => {
             e.preventDefault();
