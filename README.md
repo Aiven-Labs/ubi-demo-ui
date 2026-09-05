@@ -21,9 +21,19 @@ This app demonstrates how User Behavior Insights (UBI) turns search logs into re
 
 ## Local run
 
+1. Create a `.env` file in the project root (already gitignored):
+
+```bash
+OPENSEARCH_URL=https://user:password@your-opensearch-host:port
+```
+
+2. Install and start:
+
 ```bash
 pip install -r requirements.txt
 python app.py
 ```
 
 Open [http://localhost:8000](http://localhost:8000)
+
+`load_dotenv()` reads `.env` for local development and does not override variables already set in the environment (for example Aiven app integrations).

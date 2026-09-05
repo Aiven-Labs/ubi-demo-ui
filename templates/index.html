@@ -8,9 +8,11 @@
       body { font-family: Arial, sans-serif; margin: 0; background: #f7f7fb; color: #1b1d25; }
       .layout { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; padding: 16px; height: 100vh; box-sizing: border-box; }
       .panel { background: #fff; border: 1px solid #d9deec; border-radius: 10px; padding: 14px; }
-      .controls { display: flex; gap: 8px; margin-bottom: 12px; }
-      input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #b9c4e0; }
+      .controls { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+      input { flex: 1; min-width: 180px; padding: 10px; border-radius: 8px; border: 1px solid #b9c4e0; }
+      select { padding: 10px; border-radius: 8px; border: 1px solid #b9c4e0; background: #fff; }
       button { padding: 10px 12px; border: 0; border-radius: 8px; background: #2952cc; color: white; cursor: pointer; }
+      button:disabled { opacity: 0.65; cursor: wait; }
       .muted { color: #636a7d; font-size: 13px; }
       #results { overflow-y: auto; max-height: calc(100vh - 180px); padding-right: 4px; }
       .card { border: 1px solid #e3e7f2; border-radius: 8px; padding: 12px; margin: 10px 0; background: #fff; }
@@ -19,6 +21,21 @@
       .card h4 { margin: 0 0 6px 0; }
       .card p { margin: 0; }
       .meta { font-size: 12px; color: #606882; margin-top: 6px; }
+      .debug { margin-top: 8px; font-size: 12px; color: #606882; }
+      .debug summary { cursor: pointer; user-select: none; }
+      .debug pre {
+        margin: 6px 0 0;
+        padding: 8px;
+        overflow: auto;
+        max-height: 180px;
+        border-radius: 6px;
+        background: #f4f6fb;
+        border: 1px solid #e3e7f2;
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-size: 11px;
+        line-height: 1.4;
+      }
       .value-title { margin-top: 0; }
       .metric { margin: 10px 0; padding: 10px; border-radius: 8px; background: #f2f5ff; }
       ul { margin: 0; padding-left: 18px; }
@@ -33,6 +50,10 @@
         <div class="controls">
           <input id="query" value="wireless headphones" />
           <button id="searchBtn">Search</button>
+          <select id="seedDataset" title="Dataset to index">
+            <option value="demo">Demo products</option>
+            <option value="esci-s">ESCI-S sample</option>
+          </select>
           <button id="seedBtn">Seed Data</button>
         </div>
         <div class="muted" id="status">No query yet.</div>
@@ -99,6 +120,15 @@
               </div>
             </div>
           `;
+          const debug = document.createElement("details");
+          debug.className = "debug";
+          const summary = document.createElement("summary");
+          summary.textContent = "Debug JSON (image)";
+          const pre = document.createElement("pre");
+          // Indexed image field as returned by the API (not the picsum fallback).
+          pre.textContent = JSON.stringify({ image: item.imageUrl ?? null }, null, 2);
+          debug.append(summary, pre);
+          card.appendChild(debug);
           card.querySelector("a").addEventListener("click", async (e) => {
             e.preventDefault();
             await sendEvent("click", card, 0);
@@ -189,8 +219,20 @@
 
       document.getElementById("searchBtn").addEventListener("click", runSearch);
       document.getElementById("seedBtn").addEventListener("click", async () => {
-        await api("/api/seed", "POST");
-        statusEl.textContent = "Demo data ready. Run a search.";
+        const seedBtn = document.getElementById("seedBtn");
+        const dataset = document.getElementById("seedDataset").value;
+        const labels = { demo: "Demo products", "esci-s": "ESCI-S sample" };
+        seedBtn.disabled = true;
+        statusEl.textContent = `Seeding ${labels[dataset] || dataset}...`;
+        try {
+          const data = await api("/api/seed", "POST", { dataset });
+          const imageNote = data.with_images != null ? `, ${data.with_images} with images` : "";
+          statusEl.textContent = `${labels[dataset] || dataset} ready (${data.indexed_docs} docs${imageNote}). Run a search.`;
+        } catch (err) {
+          statusEl.textContent = `Seed failed: ${err.message || err}`;
+        } finally {
+          seedBtn.disabled = false;
+        }
       });
       document.getElementById("query").addEventListener("keydown", (e) => {
         if (e.key === "Enter") runSearch();

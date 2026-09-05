@@ -1,16 +1,37 @@
+import codecs
 import json
 import os
+import re
 import time
 import uuid
 from urllib.parse import unquote, urlparse
 
 import requests
+import zstandard as zstd
+from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
+
+load_dotenv()
 
 app = Flask(__name__)
 
 OPENSEARCH_URL = os.getenv("OPENSEARCH_URL", "").strip()
 SEARCH_INDEX = os.getenv("SEARCH_INDEX", "products_ubi_demo")
+# Full ESCI-S dump includes top-level `image` URLs; the GitHub sample.json.gz omits them.
+ESCI_S_FULL_URL = "https://esci-s.s3.amazonaws.com/esci.json.zst"
+ESCI_S_SEED_LIMIT = 4000
+DEMO_DOCS = [
+    {"id": "sku-001", "title": "Wireless Noise-Canceling Headphones", "category": "audio", "price": 199.99, "description": "Over-ear headphones with active noise cancellation, deep bass, and 40-hour battery life.", "image_url": "https://picsum.photos/id/180/320/220"},
+    {"id": "sku-002", "title": "Bluetooth Earbuds Pro", "category": "audio", "price": 89.0, "description": "Pocket-size earbuds with clear voice pickup, low latency mode, and all-day battery with charging case.", "image_url": "https://picsum.photos/id/367/320/220"},
+    {"id": "sku-003", "title": "Mechanical Keyboard TKL", "category": "accessories", "price": 129.0, "description": "Compact tenkeyless mechanical keyboard with hot-swappable tactile switches and per-key RGB lighting.", "image_url": "https://picsum.photos/id/1/320/220"},
+    {"id": "sku-004", "title": "Ergonomic Vertical Mouse", "category": "accessories", "price": 59.0, "description": "Vertical design to reduce wrist strain during long sessions, with adjustable DPI and silent clicks.", "image_url": "https://picsum.photos/id/48/320/220"},
+    {"id": "sku-005", "title": "4K Webcam with HDR", "category": "video", "price": 149.0, "description": "Ultra HD webcam with auto framing, low-light enhancement, and dual microphones for remote meetings.", "image_url": "https://picsum.photos/id/250/320/220"},
+    {"id": "sku-006", "title": "USB-C Docking Station", "category": "accessories", "price": 179.0, "description": "Single-cable laptop dock with dual monitor output, Ethernet, and high-speed USB ports.", "image_url": "https://picsum.photos/id/160/320/220"},
+    {"id": "sku-007", "title": "Portable SSD 2TB", "category": "storage", "price": 189.0, "description": "Rugged external SSD with high transfer speed for creators and developers on the go.", "image_url": "https://picsum.photos/id/1060/320/220"},
+    {"id": "sku-008", "title": "Ultrawide Monitor 34-inch", "category": "display", "price": 499.0, "description": "Curved ultrawide display with high refresh rate and color-accurate panel for productivity and gaming.", "image_url": "https://picsum.photos/id/119/320/220"},
+    {"id": "sku-009", "title": "Laptop Stand Aluminum", "category": "accessories", "price": 39.0, "description": "Adjustable stand for improved posture and airflow, suitable for laptops up to 16 inches.", "image_url": "https://picsum.photos/id/20/320/220"},
+    {"id": "sku-010", "title": "Conference Speakerphone", "category": "audio", "price": 119.0, "description": "360-degree microphone array with echo cancellation for clear hybrid meeting audio.", "image_url": "https://picsum.photos/id/99/320/220"},
+]
 
 
 def _client():
@@ -28,25 +49,132 @@ def _client():
     return session, host
 
 
-def _os_request(method: str, path: str, payload=None):
+def _os_request(method: str, path: str, payload=None, timeout=20):
     session, host = _client()
     response = session.request(
         method=method,
         url=f"{host}{path}",
         json=payload,
-        timeout=20,
+        timeout=timeout,
     )
     response.raise_for_status()
     return response.json()
 
 
-@app.get("/")
-def index():
-    return render_template("index.html")
+def _parse_price(value):
+    if value is None or value == "":
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    match = re.search(r"[\d.,]+", text)
+    if not match:
+        return 0.0
+    num = match.group(0)
+    if "," in num and "." in num:
+        if num.rfind(",") > num.rfind("."):
+            num = num.replace(".", "").replace(",", ".")
+        else:
+            num = num.replace(",", "")
+    elif "," in num:
+        parts = num.split(",")
+        num = num.replace(",", ".") if len(parts[-1]) == 2 else num.replace(",", "")
+    try:
+        return float(num)
+    except ValueError:
+        return 0.0
 
 
-@app.post("/api/seed")
-def seed():
+def _price_from_esci(item):
+    price = _parse_price(item.get("price"))
+    if price > 0:
+        return price
+    formats = item.get("formats") or {}
+    for raw in formats.values():
+        price = _parse_price(raw)
+        if price > 0:
+            return price
+    return 0.0
+
+
+def _category_from_esci(item):
+    category = item.get("category") or []
+    if isinstance(category, list):
+        parts = [str(part).strip() for part in category if str(part).strip()]
+        return " › ".join(parts) if parts else "uncategorized"
+    text = str(category).strip()
+    return text or "uncategorized"
+
+
+def _description_from_esci(item):
+    description = (item.get("description") or item.get("desc") or "").strip()
+    if description:
+        return description[:2000]
+    bullets = item.get("bullets") or []
+    if isinstance(bullets, list):
+        joined = " ".join(str(b).strip() for b in bullets if str(b).strip())
+        if joined:
+            return joined[:2000]
+    return ""
+
+
+def _image_url_from_esci(item):
+    # ESCI-S schema: top-level main image URL, e.g.
+    # "image": "https://m.media-amazon.com/images/I/81bdoltQWVL.__AC_SY300_SX300_QL70_FMwebp_.jpg"
+    image = item.get("image")
+    if isinstance(image, str):
+        return image.strip()
+    return ""
+
+
+def _doc_from_esci(item):
+    if item.get("type") == "error":
+        return None
+    asin = (item.get("asin") or "").strip()
+    title = (item.get("title") or "").strip()
+    if not asin or not title:
+        return None
+    return {
+        "id": asin,
+        "title": title,
+        "category": _category_from_esci(item),
+        "description": _description_from_esci(item),
+        "price": _price_from_esci(item),
+        "image_url": _image_url_from_esci(item),
+    }
+
+
+def _demo_docs():
+    return list(DEMO_DOCS)
+
+
+def _esci_s_docs(limit=ESCI_S_SEED_LIMIT):
+    docs = []
+    with requests.get(ESCI_S_FULL_URL, stream=True, timeout=120) as response:
+        response.raise_for_status()
+        response.raw.decode_content = False
+        dctx = zstd.ZstdDecompressor()
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        with dctx.stream_reader(response.raw) as reader:
+            buffer = ""
+            while len(docs) < limit:
+                chunk = reader.read(65536)
+                if not chunk:
+                    buffer += decoder.decode(b"", final=True)
+                    break
+                buffer += decoder.decode(chunk)
+                while "\n" in buffer and len(docs) < limit:
+                    line, buffer = buffer.split("\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    doc = _doc_from_esci(json.loads(line))
+                    if doc:
+                        docs.append(doc)
+    return docs
+
+
+def _recreate_index():
     try:
         _os_request("DELETE", f"/{SEARCH_INDEX}")
     except Exception:
@@ -57,38 +185,65 @@ def seed():
             "properties": {
                 "id": {"type": "keyword"},
                 "title": {"type": "text"},
-                "category": {"type": "keyword"},
+                "category": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
                 "description": {"type": "text"},
                 "price": {"type": "float"},
                 "image_url": {"type": "keyword"},
             }
         },
     })
-    docs = [
-        {"id": "sku-001", "title": "Wireless Noise-Canceling Headphones", "category": "audio", "price": 199.99, "description": "Over-ear headphones with active noise cancellation, deep bass, and 40-hour battery life.", "image_url": "https://picsum.photos/id/180/320/220"},
-        {"id": "sku-002", "title": "Bluetooth Earbuds Pro", "category": "audio", "price": 89.0, "description": "Pocket-size earbuds with clear voice pickup, low latency mode, and all-day battery with charging case.", "image_url": "https://picsum.photos/id/367/320/220"},
-        {"id": "sku-003", "title": "Mechanical Keyboard TKL", "category": "accessories", "price": 129.0, "description": "Compact tenkeyless mechanical keyboard with hot-swappable tactile switches and per-key RGB lighting.", "image_url": "https://picsum.photos/id/1/320/220"},
-        {"id": "sku-004", "title": "Ergonomic Vertical Mouse", "category": "accessories", "price": 59.0, "description": "Vertical design to reduce wrist strain during long sessions, with adjustable DPI and silent clicks.", "image_url": "https://picsum.photos/id/48/320/220"},
-        {"id": "sku-005", "title": "4K Webcam with HDR", "category": "video", "price": 149.0, "description": "Ultra HD webcam with auto framing, low-light enhancement, and dual microphones for remote meetings.", "image_url": "https://picsum.photos/id/250/320/220"},
-        {"id": "sku-006", "title": "USB-C Docking Station", "category": "accessories", "price": 179.0, "description": "Single-cable laptop dock with dual monitor output, Ethernet, and high-speed USB ports.", "image_url": "https://picsum.photos/id/160/320/220"},
-        {"id": "sku-007", "title": "Portable SSD 2TB", "category": "storage", "price": 189.0, "description": "Rugged external SSD with high transfer speed for creators and developers on the go.", "image_url": "https://picsum.photos/id/1060/320/220"},
-        {"id": "sku-008", "title": "Ultrawide Monitor 34-inch", "category": "display", "price": 499.0, "description": "Curved ultrawide display with high refresh rate and color-accurate panel for productivity and gaming.", "image_url": "https://picsum.photos/id/119/320/220"},
-        {"id": "sku-009", "title": "Laptop Stand Aluminum", "category": "accessories", "price": 39.0, "description": "Adjustable stand for improved posture and airflow, suitable for laptops up to 16 inches.", "image_url": "https://picsum.photos/id/20/320/220"},
-        {"id": "sku-010", "title": "Conference Speakerphone", "category": "audio", "price": 119.0, "description": "360-degree microphone array with echo cancellation for clear hybrid meeting audio.", "image_url": "https://picsum.photos/id/99/320/220"},
-    ]
-    bulk_ops = []
-    for doc in docs:
-        bulk_ops.append({"index": {"_index": SEARCH_INDEX, "_id": doc["id"]}})
-        bulk_ops.append(doc)
+
+
+def _bulk_index(docs, batch_size=200):
     session, host = _client()
-    response = session.post(
-        f"{host}/_bulk?refresh=true",
-        headers={"Content-Type": "application/x-ndjson"},
-        data="\n".join([json.dumps(op) for op in bulk_ops]) + "\n",
-        timeout=20,
-    )
-    response.raise_for_status()
-    return jsonify({"ok": True, "indexed_docs": len(docs)})
+    indexed = 0
+    for start in range(0, len(docs), batch_size):
+        batch = docs[start:start + batch_size]
+        bulk_ops = []
+        for doc in batch:
+            bulk_ops.append({"index": {"_index": SEARCH_INDEX, "_id": doc["id"]}})
+            bulk_ops.append(doc)
+        response = session.post(
+            f"{host}/_bulk?refresh=false",
+            headers={"Content-Type": "application/x-ndjson"},
+            data="\n".join(json.dumps(op) for op in bulk_ops) + "\n",
+            timeout=60,
+        )
+        response.raise_for_status()
+        result = response.json()
+        if result.get("errors"):
+            failed = sum(1 for item in result.get("items", []) if "error" in item.get("index", {}))
+            raise RuntimeError(f"Bulk indexing failed for {failed} documents")
+        indexed += len(batch)
+    _os_request("POST", f"/{SEARCH_INDEX}/_refresh")
+    return indexed
+
+
+@app.get("/")
+def index():
+    return render_template("index.html")
+
+
+@app.post("/api/seed")
+def seed():
+    body = request.get_json(force=True, silent=True) or {}
+    dataset = (body.get("dataset") or "demo").strip().lower()
+    loaders = {
+        "demo": _demo_docs,
+        "esci-s": _esci_s_docs,
+    }
+    if dataset not in loaders:
+        return jsonify({"error": f"Unknown dataset '{dataset}'. Use: {', '.join(loaders)}"}), 400
+    docs = loaders[dataset]()
+    _recreate_index()
+    indexed = _bulk_index(docs)
+    with_images = sum(1 for doc in docs if doc.get("image_url"))
+    return jsonify({
+        "ok": True,
+        "dataset": dataset,
+        "indexed_docs": indexed,
+        "with_images": with_images,
+    })
 
 
 @app.post("/api/search")
