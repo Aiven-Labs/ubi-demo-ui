@@ -147,9 +147,4 @@ From there, relevance stops being a monologue you deliver to users — and becom
 - Read the OpenSearch docs on [User Behavior Insights](https://docs.opensearch.org/latest/search-plugins/ubi/)
 - Spin up **[Aiven for OpenSearch®](https://aiven.io/opensearch)** and enable the UBI plugin from the [supported plugins list](https://aiven.io/docs/products/opensearch/reference/plugins)
 
-Your users are already teaching you what relevant means.
-The only question is whether your search stack is enrolled in the class.
-
----
-
-*OpenSearch is a registered trademark of the OpenSearch Project. This article describes a demo application built on Aiven for OpenSearch® with the User Behavior Insights plugin.*
+Your users already know what's relevant. They're clicking, scrolling, and leaving — you just have to start listening.
