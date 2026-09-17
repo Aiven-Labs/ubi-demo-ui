@@ -12,9 +12,19 @@ That gap is not a failure of effort. It is a missing feedback loop.
 
 The good news? Your users are already generating the signal. Every query, every glance past a result, every click, every long dwell on the fourth hit — those are implicit judgments. They are noisy, imperfect, and more honest than almost any spreadsheet of graded labels you will ever assemble by hand.
 
-OpenSearch® **User Behavior Insights (UBI)** exists to capture that signal in a structured way. On **Aiven for OpenSearch®**, the UBI plugin is available out of the box, so you can stop treating behavior as an afterthought and start treating it as first-class search data.
+OpenSearch® [**User Behavior Insights (UBI)**](https://www.ubisearch.dev/) exists to capture that signal in a structured way. On **Aiven for OpenSearch®**, the UBI plugin is available out of the box, so you can stop treating behavior as an afterthought and start treating it as first-class search data.
 
 This post is for relevance engineers, product managers, and platform teams who want search that gets smarter because it listens.
+
+## Why UBI lives next to search
+
+Search teams have had click data for years. The problem is where it lives.
+
+Web analytics are often hard to access, run by another team, or over-aggregated, so it is hard to extract the information search teams actually need: the exact query, the ranked list that was shown, and what the user did next.
+
+[UBI](https://www.ubisearch.dev/) was designed to close that gap. Originally co-authored by Charlie Hull, Eric Pugh, and Stavros Macrakis, it brings click data closer to search — stored in the same engine you already use to serve queries, so relevance engineers can work with it directly instead of waiting on an export from another system.
+
+The key data point is the **query**, because that is what search engineers can change: synonyms, boosts, retrievers, re-rankers. A `query_id` is kept throughout the trail of user interaction events, so every click, dwell, and scroll still points back to the question the user asked.
 
 ## Relevance is a conversation, not a formula
 
@@ -132,6 +142,8 @@ From there, relevance stops being a monologue you deliver to users — and becom
 **Try it yourself**
 
 - Explore the demo app and screenshots in the companion repo: [ubi-demo-ui](https://github.com/dimakan-dev/ubi-demo-ui)
+- The demo app was deployed on **[Aiven Runtime](https://aiven.io/runtime)**
+- Learn more about the [UBI standard](https://www.ubisearch.dev/)
 - Read the OpenSearch docs on [User Behavior Insights](https://docs.opensearch.org/latest/search-plugins/ubi/)
 - Spin up **[Aiven for OpenSearch®](https://aiven.io/opensearch)** and enable the UBI plugin from the [supported plugins list](https://aiven.io/docs/products/opensearch/reference/plugins)
 
