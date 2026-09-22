@@ -63,8 +63,6 @@ On the search request, you opt in with an `ext.ubi` block. The plugin records th
 
 We built a lightweight demo UI on Aiven for OpenSearch® to make that loop visible: seed product data (including a slice of the [ESCI-S](https://github.com/shuttie/esci-s) e-commerce corpus), search, scroll, click — and watch UBI metrics update while the same data lands in OpenSearch Dashboards.
 
-The experience is intentionally simple. The point is not the chrome. The point is the closed loop.
-
 ### The UI: search, engage, measure
 
 Here is a live session for `racing game` — results on the left, aggregated behavior on the right (query volume, CTR, average dwell, top queries):
@@ -145,6 +143,6 @@ From there, relevance stops being a monologue you deliver to users — and becom
 - The demo app was deployed on **[Aiven Runtime](https://aiven.io/runtime)**
 - Learn more about the [UBI standard](https://www.ubisearch.dev/)
 - Read the OpenSearch docs on [User Behavior Insights](https://docs.opensearch.org/latest/search-plugins/ubi/)
-- Spin up **[Aiven for OpenSearch®](https://aiven.io/opensearch)** and enable the UBI plugin from the [supported plugins list](https://aiven.io/docs/products/opensearch/reference/plugins)
+- Spin up **[Aiven for OpenSearch®](https://aiven.io/opensearch)** and use the UBI plugin from the [supported plugins list](https://aiven.io/docs/products/opensearch/reference/plugins)
 
 Your users already know what's relevant. They're clicking, scrolling, and leaving — you just have to start listening.
